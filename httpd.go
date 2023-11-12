@@ -23,15 +23,18 @@ type API struct {
 	log *slog.Logger
 }
 
+// indexHTML returns the index HTML.
 func (a *API) indexHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		a.log.Error("bad method", "method", r.Method)
 		http.Error(w, "bad method", http.StatusMethodNotAllowed)
 		return
 	}
+	w.Header().Set("content-type", "text/html")
 	w.Write(indexHTML)
 }
 
+// Center returns the center point (lat, lng) of gpx points
 func center(gpx GPX) (float64, float64) {
 	lat, lng := 0.0, 0.0
 
@@ -44,6 +47,7 @@ func center(gpx GPX) (float64, float64) {
 	return lat / size, lng / size
 }
 
+// mean returns the mean of values.
 func mean(values []float64) float64 {
 	total := 0.0
 	for _, v := range values {
@@ -52,37 +56,7 @@ func mean(values []float64) float64 {
 	return total / float64(len(values))
 }
 
-func byMinute(points []Point) []Point {
-	minute := -1
-	var lats [][]float64
-	var lngs [][]float64
-	var times []time.Time
-
-	// Group by minute
-	for _, pt := range points {
-		if pt.Time.Minute() != minute { // New minute group
-			lngs = append(lngs, []float64{pt.Lng})
-			lats = append(lats, []float64{pt.Lat})
-			times = append(times, pt.Time)
-			minute = pt.Time.Minute()
-			continue
-		}
-		i := len(lats) - 1
-		lats[i] = append(lats[i], pt.Lat)
-		lngs[i] = append(lngs[i], pt.Lng)
-	}
-
-	// Average per minute
-	avgs := make([]Point, len(lngs))
-	for i := range lngs {
-		avgs[i].Time = times[i]
-		avgs[i].Lat = mean(lats[i])
-		avgs[i].Lng = mean(lngs[i])
-	}
-
-	return avgs
-}
-
+// mapHandler gets GPX file via HTML form and return map from mapTemplate.
 func (a *API) mapHandler(w http.ResponseWriter, r *http.Request) {
 	a.log.Info("map called", "remote", r.RemoteAddr)
 	if r.Method != http.MethodPost {
@@ -112,8 +86,10 @@ func (a *API) mapHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.log.Info("gpx parsed", "name", gpx.Name, "count", len(gpx.Points))
-	minPts := byMinute(gpx.Points)
+	minPts := aggByMinute(gpx.Points)
 	a.log.Info("minute agg", "count", len(minPts))
+
+	// Data for template
 	points := make([]map[string]any, len(minPts))
 	for i, pt := range minPts {
 		points[i] = map[string]any{
@@ -126,10 +102,12 @@ func (a *API) mapHandler(w http.ResponseWriter, r *http.Request) {
 	clat, clng := center(gpx)
 	data := map[string]any{
 		"Name":   gpx.Name,
+		"Date":   gpx.Time.Format(time.DateOnly),
 		"Center": map[string]float64{"Lat": clat, "Lng": clng},
 		"Points": points,
 	}
 
+	w.Header().Set("content-type", "text/html")
 	if err := mapTemplate.Execute(w, data); err != nil {
 		a.log.Error("can't execute template", "error", err)
 	}
