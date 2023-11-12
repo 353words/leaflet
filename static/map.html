@@ -11,14 +11,10 @@
      crossorigin=""></script>
   </head>
   <body>
-    <div class="container-fluid">
-      <div class="row">
-	&nbsp;
-      </div>
+    <div class="container">
       <div class="row text-center">
-	<div class="col">
-	  <h1 class="alert alert-primary">Miki's Run</h1>
-	</div>
+	<h1 class="alert alert-primary" role="alert">GPX File Viewer</h1>
+	<h3 class="alert alert-secondary" role="alert">{{ .Name }}</h1>
       </div>
       <div class="row">
 	<div class="col">
@@ -28,11 +24,14 @@
     </div>
     <script>
       var points = [
-	{ loc: [51.508, -0.11], time: "13:48" },
+{{- range $idx, $pt := .Points }}
+{{ if $idx }},{{ end -}}
+    { "lat": {{ $pt.Lat }}, "lng": {{ $pt.Lng -}}, "time": {{ $pt.Time }} }
+{{- end }}
       ];
 
       function on_loaded() {
-	var map = L.map('map').setView([51.505, -0.09], 13);
+	  var map = L.map('map').setView([{{ .Center.Lat }}, {{ .Center.Lng }}], 15);
 	L.tileLayer(
 	  'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
 	  {
@@ -41,9 +40,11 @@
 	   }
 	).addTo(map);
 	points.forEach((pt) => {
-	  var circle = L.circle(pt.loc, {
+	  let circle = L.circle(
+	  [pt.lat, pt.lng],
+	  {
 	      color: 'red',
-	      radius: 100
+	      radius: 20
 	  }).addTo(map);
 	  circle.bindPopup(pt.time);
 	});
