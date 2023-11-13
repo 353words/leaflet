@@ -58,34 +58,35 @@ func ParseGPX(r io.Reader) (GPX, error) {
 	return gpx, nil
 }
 
-// aggByMinute aggregates points by the minute.
-func aggByMinute(points []Point) []Point {
-	minute := -1
+// roundToMinute rounds time to minute granularity.
+func roundToMinute(t time.Time) time.Time {
+	year, month, day := t.Year(), t.Month(), t.Day()
+	hour, minute := t.Hour(), t.Minute()
+
+	return time.Date(year, month, day, hour, minute, 0, 0, t.Location())
+}
+
+// meanByMinute aggregates points by the minute.
+func meanByMinute(points []Point) []Point {
 	// Aggregate columns
-	var lats [][]float64
-	var lngs [][]float64
-	var times []time.Time
+	lats := make(map[time.Time][]float64)
+	lngs := make(map[time.Time][]float64)
 
 	// Group by minute
 	for _, pt := range points {
-		if pt.Time.Minute() != minute { // New minute group
-			lngs = append(lngs, []float64{pt.Lng})
-			lats = append(lats, []float64{pt.Lat})
-			times = append(times, pt.Time)
-			minute = pt.Time.Minute()
-			continue
-		}
-		i := len(lats) - 1
-		lats[i] = append(lats[i], pt.Lat)
-		lngs[i] = append(lngs[i], pt.Lng)
+		key := roundToMinute(pt.Time)
+		lats[key] = append(lats[key], pt.Lat)
+		lngs[key] = append(lngs[key], pt.Lng)
 	}
 
 	// Average per minute
 	avgs := make([]Point, len(lngs))
-	for i := range lngs {
-		avgs[i].Time = times[i]
-		avgs[i].Lat = mean(lats[i])
-		avgs[i].Lng = mean(lngs[i])
+	i := 0
+	for time, lats := range lats {
+		avgs[i].Time = time
+		avgs[i].Lat = mean(lats)
+		avgs[i].Lng = mean(lngs[time])
+		i++
 	}
 
 	return avgs

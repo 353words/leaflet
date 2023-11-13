@@ -31,19 +31,21 @@ func (a *API) indexHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("content-type", "text/html")
-	w.Write(indexHTML)
+	if _, err := w.Write(indexHTML); err != nil {
+		a.log.Error("can't write", "error", err)
+	}
 }
 
 // Center returns the center point (lat, lng) of gpx points
-func center(gpx GPX) (float64, float64) {
+func center(points []Point) (float64, float64) {
 	lat, lng := 0.0, 0.0
 
-	for _, pt := range gpx.Points {
+	for _, pt := range points {
 		lat += pt.Lat
 		lng += pt.Lng
 	}
 
-	size := float64(len(gpx.Points))
+	size := float64(len(points))
 	return lat / size, lng / size
 }
 
@@ -86,12 +88,12 @@ func (a *API) mapHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.log.Info("gpx parsed", "name", gpx.Name, "count", len(gpx.Points))
-	minPts := aggByMinute(gpx.Points)
-	a.log.Info("minute agg", "count", len(minPts))
+	meanPts := meanByMinute(gpx.Points)
+	a.log.Info("minute agg", "count", len(meanPts))
 
 	// Data for template
-	points := make([]map[string]any, len(minPts))
-	for i, pt := range minPts {
+	points := make([]map[string]any, len(meanPts))
+	for i, pt := range meanPts {
 		points[i] = map[string]any{
 			"Lat":  pt.Lat,
 			"Lng":  pt.Lng,
@@ -99,7 +101,7 @@ func (a *API) mapHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	clat, clng := center(gpx)
+	clat, clng := center(gpx.Points)
 	data := map[string]any{
 		"Name":   gpx.Name,
 		"Date":   gpx.Time.Format(time.DateOnly),
@@ -132,8 +134,9 @@ func main() {
 
 	addr := ":8080"
 	srv := http.Server{
-		Addr:    addr,
-		Handler: mux,
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: time.Second,
 	}
 
 	log.Info("server starting", "address", addr)
