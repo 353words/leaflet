@@ -11,7 +11,7 @@ author = "mikit"
 ### Overview
 
 I'm close to my goal of hitting 1,000 kilometer of walking this year.
-Whenever I walk a new route, I like to record it. The data that comes out of the recording application ([Strava](https://www.strava.com/dashboard) in my case) is in [GPX format](https://en.wikipedia.org/wiki/GPS_Exchange_Format).
+Whenever I try a new route, I record it. The data that comes out of the recording application ([Strava](https://www.strava.com/dashboard) in my case) is in [GPX format](https://en.wikipedia.org/wiki/GPS_Exchange_Format).
 Starva does visualize the route, but I like to do it on my own as well.
 Which brought me to this blog post about using [Leaflet JS](https://leafletjs.com/) to visualize GPX data.
 
@@ -27,7 +27,7 @@ Let's start by having a look at the GPX file first
 
 **Listing 1: Morning_Walk.gpx**
 
-```
+```html
 01 <?xml version="1.0" encoding="UTF-8"?>
 02 <gpx creator="StravaGPX Android" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd" version="1.1" xmlns="http://www.topografix.com/GPX/1/1">
 03  <metadata>
@@ -57,8 +57,8 @@ Let's run a quick query to see how many points are in this file:
 
 **Listing 2: Number of Points**
 
-```
-$ grep '<trkpt' Morning_Walk.gpx| wc -l
+```bash
+$ grep '<trkpt' Morning_Walk.gpx | wc -l
 2600
 ```
 
@@ -72,7 +72,7 @@ Let's start by parsing the GPX file using the build-in `encoing/xml` package.
 
 **Listing 3: Parsing GPX**
 
-```
+```go
 09 // Point is a point in GPX data.
 10 type Point struct {
 11     Lat  float64
@@ -126,61 +126,72 @@ Let's start by parsing the GPX file using the build-in `encoing/xml` package.
 59 }
 ```
 
-Listing 3 shows how to parse a GPX file. On lines 10 and 17 you define the `Point` and `GPX` structs. They are the types returned from parsing. As a general rule, don't expose the internal data structures (e.g. the one in the XML) to your API.
+Listing 3 shows how to parse a GPX file. On lines 10 and 21 you define the `Point` and `GPX` structs. They are the types returned from parsing. As a general rule, don't expose the internal data structures (e.g. the one in the XML) to your API.
+For example, GPX calls longitude `lon` while leaflet uses `lng`.
 On line 24 you define the `ParseGPX` function that accepts an `io.Reader`.
-On line 25 you define an anonymous struct that corresponds to the structure of the GPX xml. There is no need to model the whole structure of the XML, only the elements you are interested in.
+On lines 25-39 you define an anonymous struct that corresponds to the structure of the GPX xml. There is no need to model the whole structure of the XML, only the elements you are interested in.
 On line 33 and 34 you specify the `Lat` and `Lng` are not XML elements but attributes using `,attr` in the field tag.
 On lines 41 to 44 you use an XML decoder to parse the data into the `xmlData` struct.
-On lines 46 to 58 you transform data in `xmlData` to the API level `GPX` type.
+On lines 46 to 56 you transform data in `xmlData` to the API level `GPX` type.
+Finally, on line 58 you return the GPX.
 
 ### Data Aggregation
 
 Since there are too many points to display on the map, you are going to aggregate the points by minute.
+This is similar to SQL [`GROUP BY`](https://en.wikipedia.org/wiki/Group_by_(SQL)) where you first group rows to buckets depending on a key (the time rounded to a minute in our case) and then run an aggregation on the values in each bucket (mean in our case). The SQL code (for SQLite3) can be something like:
+
+```sql
+SELECT
+    strftime('%H:%M', time),
+    AVG(lat),
+    AVG(lng)
+FROM pts
+    GROUP BY strftime('%H:%M', time)
+;
+```
 
 **Listing 4: Aggregation**
 
-```
-61 // aggByMinute aggregates points by the minute.
-62 func aggByMinute(points []Point) []Point {
-63     minute := -1
-64     // Aggregate columns
-65     var lats [][]float64
-66     var lngs [][]float64
-67     var times []time.Time
+```go
+61 // roundToMinute rounds time to minute granularity.
+62 func roundToMinute(t time.Time) time.Time {
+63     year, month, day := t.Year(), t.Month(), t.Day()
+64     hour, minute := t.Hour(), t.Minute()
+65 
+66     return time.Date(year, month, day, hour, minute, 0, 0, t.Location())
+67 }
 68 
-69     // Group by minute
-70     for _, pt := range points {
-71         if pt.Time.Minute() != minute { // New minute group
-72             lngs = append(lngs, []float64{pt.Lng})
-73             lats = append(lats, []float64{pt.Lat})
-74             times = append(times, pt.Time)
-75             minute = pt.Time.Minute()
-76             continue
-77         }
-78         i := len(lats) - 1
-79         lats[i] = append(lats[i], pt.Lat)
-80         lngs[i] = append(lngs[i], pt.Lng)
-81     }
-82 
-83     // Average per minute
-84     avgs := make([]Point, len(lngs))
-85     for i := range lngs {
-86         avgs[i].Time = times[i]
-87         avgs[i].Lat = mean(lats[i])
-88         avgs[i].Lng = mean(lngs[i])
-89     }
-90 
-91     return avgs
-92 }
+69 // meanByMinute aggregates points by the minute.
+70 func meanByMinute(points []Point) []Point {
+71     // Aggregate columns
+72     lats := make(map[time.Time][]float64)
+73     lngs := make(map[time.Time][]float64)
+74 
+75     // Group by minute
+76     for _, pt := range points {
+77         key := roundToMinute(pt.Time)
+78         lats[key] = append(lats[key], pt.Lat)
+79         lngs[key] = append(lngs[key], pt.Lng)
+80     }
+81 
+82     // Average per minute
+83     avgs := make([]Point, len(lngs))
+84     i := 0
+85     for time, lats := range lats {
+86         avgs[i].Time = time
+87         avgs[i].Lat = mean(lats)
+88         avgs[i].Lng = mean(lngs[time])
+89         i++
+90     }
+91 
+92     return avgs
+93 }
 ```
 
-Listing 4 shows `aggByMinute` that aggregates points by minute.
-On line 63 we define the current minute to be -1 so it won't match any actual minute in the data.
-On lines 65-67 we define the aggregation columns.
-On lines 70-81 we group points by minute. On line 71 we check if the current minute matches the data point minute, if not we start another group for this minute on lines 72-74 and update the current minute on line 75. Otherwise we add the current point data to the current minute group.
-This loop assumes that the points are already sorted in ascending time order.
-
-On lines 84-89 we create new slice of points where each point has the group time and the average of latitude and longitude.
+Listing 4 shows `meanByMinute` that aggregates points by minute.
+On lines 72 and 73 we define the aggregation columns.
+On lines 76-80 we group points by minute. 
+On lines 83-80 we create new slice of points where each point has the group time and the average of latitude and longitude.
 
 ### Map HTML Template
 
@@ -188,140 +199,142 @@ You are going to use `html/template` to render the map. Most of the HTML is stat
 
 **Listing 5: Map HTML Template**
 
-```
+```html
 01 <!doctype html>
 02 <html>
 03   <head>
-04     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" integrity="sha384-rbsA2VBKQhggwzxH7pPCaAqO46MgnOM80zW1RWuH61DGLwZJEdK2Kadq2F9CUG65" crossorigin="anonymous">
-05     <meta name="viewport" content="width=device-width, initial-scale=1">
-06     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-07       integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-08       crossorigin=""/>
-09     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-10      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-11      crossorigin=""></script>
-12   </head>
-13   <body>
-14     <div class="container">
-15       <div class="row text-center">
-16     <h1 class="alert alert-primary" role="alert">GPX File Viewer</h1>
-17     <h3 class="alert alert-secondary" role="alert">{{ .Name }} on {{ .Date }}</h1>
-18       </div>
-19       <div class="row">
-20     <div class="col">
-21       <div id="map" style="height: 600px; border: 1px solid black;"></div>
-22     </div>
-23       </div>
+04     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" 
+05       integrity="sha384-rbsA2VBKQhggwzxH7pPCaAqO46MgnOM80zW1RWuH61DGLwZJEdK2Kadq2F9CUG65"
+06       crossorigin="anonymous">
+07     <meta name="viewport" content="width=device-width, initial-scale=1">
+08     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+09       integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+10       crossorigin=""/>
+11     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+12      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+13      crossorigin=""></script>
+14   </head>
+15   <body>
+16     <div class="container">
+17       <div class="row text-center">
+18     <h1 class="alert alert-primary" role="alert">GPX File Viewer</h1>
+19     <h3 class="alert alert-secondary" role="alert">{{ .Name }} on {{ .Date }}</h1>
+20       </div>
+21       <div class="row">
+22     <div class="col">
+23       <div id="map" style="height: 600px; border: 1px solid black;"></div>
 24     </div>
-25     <script>
-26       var points = [
-27 {{- range $idx, $pt := .Points }}
-28 {{ if $idx }},{{ end -}}
-29     { "lat": {{ $pt.Lat }}, "lng": {{ $pt.Lng -}}, "time": {{ $pt.Time }} }
-30 {{- end }}
-31       ];
-32 
-33       function on_loaded() {
-34       var map = L.map('map').setView([{{ .Center.Lat }}, {{ .Center.Lng }}], 15);
-35     L.tileLayer(
-36       'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-37       {
-38         maxZoom: 19,
-39         attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-40        }
-41     ).addTo(map);
-42     points.forEach((pt) => {
-43       let circle = L.circle(
-44       [pt.lat, pt.lng],
-45       {
-46           color: 'red',
-47           radius: 20
-48       }).addTo(map);
-49       circle.bindPopup(pt.time);
-50     });
-51       }
-52 
-53       document.addEventListener('DOMContentLoaded', on_loaded);
-54     </script>
-55   </body>
-56 </html>
+25       </div>
+26     </div>
+27     <script>
+28       var points = [
+29     {{- range $idx, $pt := .Points }}
+30     {{ if $idx }},{{ end -}}
+31     { "lat": {{ $pt.Lat }}, "lng": {{ $pt.Lng -}}, "time": {{ $pt.Time }} }
+32     {{- end }}
+33       ];
+34 
+35       function on_loaded() {
+36     var map = L.map('map').setView([{{ .Center.Lat }}, {{ .Center.Lng }}], 15);
+37     L.tileLayer(
+38       'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+39       {
+40         maxZoom: 19,
+41         attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+42       }
+43     ).addTo(map);
+44     points.forEach((pt) => {
+45       let circle = L.circle(
+46         [pt.lat, pt.lng],
+47         {
+48           color: 'red',
+49           radius: 20
+50         }).addTo(map);
+51       circle.bindPopup(pt.time);
+52     });
+53       }
+54 
+55       document.addEventListener('DOMContentLoaded', on_loaded);
+56     </script>
+57   </body>
+58 </html>
+
 ```
 
 Listing 5 shows the map HTML template file.
 On lines 04-11 we import [bootstrap](https://getbootstrap.com/) for a nice UI and also the leafletjs CSS and JS files.
-On line 17 we use the template to set the name and date of the GPX file.
-On lines 26-31 we generate a JavaScript array with the points from the input.
-On lines 33-51 we write JavaScript code to generate the map. On line 34 we create the map with a center location and set the zoom level to 20. On lines 35-41 we load the tiles from [OpenStreetMap](https://www.openstreetmap.org/#map=8/31.438/35.074). On lines 42-50 we iterate over the points, adding them to the map on lines 43-48 as a red circle and setting the tooltip to be the hour on line 49.
+On line 19 we use the template to set the name and date of the GPX file.
+On lines 29-32 we generate a JavaScript array with the points from the input.
+On lines 35-53 we write JavaScript code to generate the map. On line 36 we create the map with a center location and set the zoom level to 20. On lines 37-43 we load the tiles from [OpenStreetMap](https://www.openstreetmap.org/). On lines 44-53 we iterate over the points, adding them to the map on lines 45-50 as a red circle and setting the tooltip to be the hour on line 51.
 
 ### Map HTTP Handler
 
 **Listing 6: Map HTTP Handler**
 
-```
-59 // mapHandler gets GPX file via HTML form and return map from mapTemplate.
-60 func (a *API) mapHandler(w http.ResponseWriter, r *http.Request) {
-61     a.log.Info("map called", "remote", r.RemoteAddr)
-62     if r.Method != http.MethodPost {
-63         a.log.Error("bad method", "method", r.Method)
-64         http.Error(w, "bad method", http.StatusMethodNotAllowed)
-65         return
-66     }
-67 
-68     if err := r.ParseMultipartForm(1 << 20); err != nil {
-69         a.log.Error("bad form", "error", err)
-70         http.Error(w, "bad form", http.StatusBadRequest)
-71         return
-72     }
-73 
-74     file, _, err := r.FormFile("gpx")
-75     if err != nil {
-76         a.log.Error("missing gpx file", "error", err)
-77         http.Error(w, "missing gpx file", http.StatusBadRequest)
-78         return
-79     }
-80 
-81     gpx, err := ParseGPX(file)
-82     if err != nil {
-83         a.log.Error("bad gpx", "error", err)
-84         http.Error(w, "bad gpx", http.StatusBadRequest)
-85         return
-86     }
-87 
-88     a.log.Info("gpx parsed", "name", gpx.Name, "count", len(gpx.Points))
-89     minPts := aggByMinute(gpx.Points)
-90     a.log.Info("minute agg", "count", len(minPts))
-91 
-92     // Data for template
-93     points := make([]map[string]any, len(minPts))
-94     for i, pt := range minPts {
-95         points[i] = map[string]any{
-96             "Lat":  pt.Lat,
-97             "Lng":  pt.Lng,
-98             "Time": pt.Time.Format("15:04"), // HH:MM
-99         }
-100     }
-101 
-102     clat, clng := center(gpx)
-103     data := map[string]any{
-104         "Name":   gpx.Name,
-105         "Date":   gpx.Time.Format(time.DateOnly),
-106         "Center": map[string]float64{"Lat": clat, "Lng": clng},
-107         "Points": points,
-108     }
-109 
-110     w.Header().Set("content-type", "text/html")
-111     if err := mapTemplate.Execute(w, data); err != nil {
-112         a.log.Error("can't execute template", "error", err)
-113     }
-114 }
-115 
+```go
+61 // mapHandler gets GPX file via HTML form and return map from mapTemplate.
+62 func (a *API) mapHandler(w http.ResponseWriter, r *http.Request) {
+63     a.log.Info("map called", "remote", r.RemoteAddr)
+64     if r.Method != http.MethodPost {
+65         a.log.Error("bad method", "method", r.Method)
+66         http.Error(w, "bad method", http.StatusMethodNotAllowed)
+67         return
+68     }
+69 
+70     if err := r.ParseMultipartForm(1 << 20); err != nil {
+71         a.log.Error("bad form", "error", err)
+72         http.Error(w, "bad form", http.StatusBadRequest)
+73         return
+74     }
+75 
+76     file, _, err := r.FormFile("gpx")
+77     if err != nil {
+78         a.log.Error("missing gpx file", "error", err)
+79         http.Error(w, "missing gpx file", http.StatusBadRequest)
+80         return
+81     }
+82 
+83     gpx, err := ParseGPX(file)
+84     if err != nil {
+85         a.log.Error("bad gpx", "error", err)
+86         http.Error(w, "bad gpx", http.StatusBadRequest)
+87         return
+88     }
+89 
+90     a.log.Info("gpx parsed", "name", gpx.Name, "count", len(gpx.Points))
+91     meanPts := meanByMinute(gpx.Points)
+92     a.log.Info("minute agg", "count", len(meanPts))
+93 
+94     // Data for template
+95     points := make([]map[string]any, len(meanPts))
+96     for i, pt := range meanPts {
+97         points[i] = map[string]any{
+98             "Lat":  pt.Lat,
+99             "Lng":  pt.Lng,
+100             "Time": pt.Time.Format("15:04"), // HH:MM
+101         }
+102     }
+103 
+104     clat, clng := center(gpx.Points)
+105     data := map[string]any{
+106         "Name":   gpx.Name,
+107         "Date":   gpx.Time.Format(time.DateOnly),
+108         "Center": map[string]float64{"Lat": clat, "Lng": clng},
+109         "Points": points,
+110     }
+111 
+112     w.Header().Set("content-type", "text/html")
+113     if err := mapTemplate.Execute(w, data); err != nil {
+114         a.log.Error("can't execute template", "error", err)
+115     }
+116 }
 ```
 
 Listing 6 shows the map HTTP handler.
-On lines 68-79 you parse the HTTP form and get the GPX file from the form.
-On line 81-90 you parse the GPX and aggregate the points.
-On lines 92-108 you generate the data for the template. On lines 94-100 you create the slice of points. On line 102 you calculate the center of the map and on lines 103-108 you create the `data` map that contains all the elements.
-One line 110 you set the content type and on lines 111-113 you execute the template with the data.
+On lines 70-74 you parse the HTTP form and get the GPX file from the form.
+On line 83-88 you parse the GPX and aggregate the points.
+On lines 94-110 you generate the data for the template. On lines 95-102 you create the slice of points. On line 104 you calculate the center of the map and on lines 105-110 you create the `data` map that contains all the elements.
+One line 112 you set the content type and on lines 113-115 you execute the template with the data.
 
 _Note: The `center` function is not shown here. You can view it in the GitHub repository._
 
@@ -329,7 +342,7 @@ _Note: The `center` function is not shown here. You can view it in the GitHub re
 
 **Listing 7: HTTP Handler**
 
-```
+```go
 12 var (
 13     //go:embed static/index.html
 14     indexHTML []byte
@@ -343,45 +356,47 @@ _Note: The `center` function is not shown here. You can view it in the GitHub re
 22 type API struct {
 23     log *slog.Logger
 24 }
-25 
-116 func main() {
-117     log := slog.New(slog.NewTextHandler(os.Stdout, nil))
-118     tmpl, err := template.New("map").Parse(mapHTML)
-119     if err != nil {
-120         log.Error("can't parse map HTML", "error", err)
-121         os.Exit(1)
-122     }
-123     mapTemplate = tmpl
-124 
-125     api := API{
-126         log: log,
-127     }
-128 
-129     mux := http.NewServeMux()
-130     mux.HandleFunc("/", api.indexHandler)
-131     mux.HandleFunc("/map", api.mapHandler)
-132 
-133     addr := ":8080"
-134     srv := http.Server{
-135         Addr:    addr,
-136         Handler: mux,
-137     }
-138 
-139     log.Info("server starting", "address", addr)
-140     if err := srv.ListenAndServe(); err != nil {
-141         log.Error("can't serve", "error", err)
-142         os.Exit(1)
-143     }
-144 }
+...
+117 
+118 func main() {
+119     log := slog.New(slog.NewTextHandler(os.Stdout, nil))
+120     tmpl, err := template.New("map").Parse(mapHTML)
+121     if err != nil {
+122         log.Error("can't parse map HTML", "error", err)
+123         os.Exit(1)
+124     }
+125     mapTemplate = tmpl
+126 
+127     api := API{
+128         log: log,
+129     }
+130 
+131     mux := http.NewServeMux()
+132     mux.HandleFunc("/", api.indexHandler)
+133     mux.HandleFunc("/map", api.mapHandler)
+134 
+135     addr := ":8080"
+136     srv := http.Server{
+137         Addr:              addr,
+138         Handler:           mux,
+139         ReadHeaderTimeout: time.Second,
+140     }
+141 
+142     log.Info("server starting", "address", addr)
+143     if err := srv.ListenAndServe(); err != nil {
+144         log.Error("can't serve", "error", err)
+145         os.Exit(1)
+146     }
+147 }
 ```
 
-Listing 7 shows the HTTP handler.
-On lines 12-30 you embed the template in the executable using the `embed` package.
+Listing 7 shows the how you run the HTTP server.
+On lines 12-20 you embed the template in the executable using the `embed` package.
 On lines 22-24 you define the API struct.
-On line 117 you create a logger from the `log/slog` package.
-On lines 118-123 you parse the map HTML template and set the package level `mapTemplate` variable.
-On lines 125-127 you create and API and on lines 129-131 you set the routing.
-On lines 133-137 you create an HTTP server and on lines 140-143 you run it.
+On line 1 you create a logger from the `log/slog` package.
+On lines 120-125 you parse the map HTML template and set the package level `mapTemplate` variable.
+On lines 127-129 you create and API and on lines 131-133 you set the routing.
+On lines 135-140 you create an HTTP server and on lines 142-146 you run it.
 
 
 ### Conclusion
