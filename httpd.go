@@ -1,7 +1,7 @@
 package main
 
 import (
-	_ "embed"
+	"embed"
 	"html/template"
 	"log/slog"
 	"net/http"
@@ -10,30 +10,16 @@ import (
 )
 
 var (
-	//go:embed static/index.html
-	indexHTML []byte
+	//go:embed index.html map.js
+	staticFS embed.FS
 
-	//go:embed static/map.html
-	mapHTML string
-
+	//go:embed map.html
+	mapHTML     string
 	mapTemplate *template.Template
 )
 
 type API struct {
 	log *slog.Logger
-}
-
-// indexHTML returns the index HTML.
-func (a *API) indexHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		a.log.Error("bad method", "method", r.Method)
-		http.Error(w, "bad method", http.StatusMethodNotAllowed)
-		return
-	}
-	w.Header().Set("content-type", "text/html")
-	if _, err := w.Write(indexHTML); err != nil {
-		a.log.Error("can't write", "error", err)
-	}
 }
 
 // Center returns the center point (lat, lng) of gpx points
@@ -129,7 +115,7 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", api.indexHandler)
+	mux.Handle("/", http.FileServer(http.FS(staticFS)))
 	mux.HandleFunc("/map", api.mapHandler)
 
 	addr := ":8080"
