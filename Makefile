@@ -1,4 +1,4 @@
-src_files = $(wildcard *.go) $(wildcard static/*.html) ./testdata/Morning_Walk.gpx
+src_files = $(wildcard *.go) index.html map.html map.js ./testdata/Morning_Walk.gpx
 
 all:
 	@echo Please pick a target, should be one of:
@@ -11,9 +11,14 @@ test:
 
 html:
 	for src in $(src_files) ; do \
-		../blog_fmt.sh $$src ;\
+		echo $$src ; \
+		test -f $$src && ../blog_fmt.sh $$src ;\
 	done
 
 deps:
 	go install honnef.co/go/tools/cmd/staticcheck@latest
 	go install github.com/securego/gosec/v2/cmd/gosec@latest
+
+
+size:
+	cloc httpd.go gpx.go index.html map.html map.js
