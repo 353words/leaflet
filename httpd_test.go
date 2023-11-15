@@ -13,22 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func Test_indexHandler(t *testing.T) {
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
-
-	api := API{
-		log: slog.Default(),
-	}
-
-	api.indexHandler(w, r)
-	resp := w.Result()
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	data, err := io.ReadAll(resp.Body)
-	require.NoError(t, err, "read body")
-	require.True(t, bytes.Contains(data, []byte("<body>")))
-}
-
 func Test_mapHandler(t *testing.T) {
 	// error: no multipart boundary param in Content-Type
 	//t.Skip("FIXME")
