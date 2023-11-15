@@ -81,60 +81,56 @@ Let's start by parsing the GPX file using the built-in `encoing/xml` package.
 13     Time time.Time
 14 }
 15 
-16 // GPX is data in GPX file.
+16 // GPX is data in a GPX file.
 17 type GPX struct {
 18     Name   string
 19     Time   time.Time
 20     Points []Point
 21 }
 22 
-23 // ParseGPX parses GPX file, returns GPX.
+23 // ParseGPX parses a GPX file, returns GPX.
 24 func ParseGPX(r io.Reader) (GPX, error) {
 25     var xmlData struct {
-26         Meta struct {
-27             Time time.Time `xml:"time"`
-28         } `xml:"metadata"`
-29         Trk struct {
-30             Name    string `xml:"name"`
-31             Segment struct {
-32                 Points []struct {
-33                     Lat  float64   `xml:"lat,attr"`
-34                     Lon  float64   `xml:"lon,attr"`
-35                     Time time.Time `xml:"time"`
-36                 } `xml:"trkpt"`
-37             } `xml:"trkseg"`
-38         } `xml:"trk"`
-39     }
-40 
-41     dec := xml.NewDecoder(r)
-42     if err := dec.Decode(&xmlData); err != nil {
-43         return GPX{}, err
-44     }
-45 
-46     gpx := GPX{
-47         Name:   xmlData.Trk.Name,
-48         Time:   xmlData.Meta.Time,
-49         Points: make([]Point, len(xmlData.Trk.Segment.Points)),
-50     }
-51 
-52     for i, pt := range xmlData.Trk.Segment.Points {
-53         gpx.Points[i].Lat = pt.Lat
-54         gpx.Points[i].Lng = pt.Lon
-55         gpx.Points[i].Time = pt.Time
-56     }
-57 
-58     return gpx, nil
-59 }
+26         Time time.Time `xml:"metadata>time"`
+27         Trk  struct {
+28             Name   string `xml:"name"`
+29             Points []struct {
+30                 Lat  float64   `xml:"lat,attr"`
+31                 Lon  float64   `xml:"lon,attr"`
+32                 Time time.Time `xml:"time"`
+33             } `xml:"trkseg>trkpt"`
+34         } `xml:"trk"`
+35     }
+36 
+37     dec := xml.NewDecoder(r)
+38     if err := dec.Decode(&xmlData); err != nil {
+39         return GPX{}, err
+40     }
+41 
+42     gpx := GPX{
+43         Name:   xmlData.Trk.Name,
+44         Time:   xmlData.Time,
+45         Points: make([]Point, len(xmlData.Trk.Points)),
+46     }
+47 
+48     for i, pt := range xmlData.Trk.Points {
+49         gpx.Points[i].Lat = pt.Lat
+50         gpx.Points[i].Lng = pt.Lon
+51         gpx.Points[i].Time = pt.Time
+52     }
+53 
+54     return gpx, nil
+55 }
 ```
 
-Listing 3 shows how to parse a GPX file. On lines 10 and 21 you define the `Point` and `GPX` structs. They are the types returned from parsing. As a general rule, don't expose the internal data structures (e.g. the one in the XML) to your API.
+Listing 3 shows how to parse a GPX file. On lines 10 and 16 you define the `Point` and `GPX` structs. They are the types returned from parsing. As a general rule, don't expose the internal data structures (e.g. the one in the XML) to your API.
 For example, GPX calls longitude `lon` while leaflet uses `lng`.
 On line 24 you define the `ParseGPX` function that accepts an `io.Reader`.
-On lines 25-39 you define an anonymous struct that corresponds to the structure of the GPX xml. There is no need to model the whole structure of the XML, only the elements you are interested in.
-On line 33 and 34 you specify the `Lat` and `Lng` are not XML elements but attributes using `,attr` in the field tag.
-On lines 41 to 44 you use an XML decoder to parse the data into the `xmlData` struct.
-On lines 46 to 56 you transform data in `xmlData` to the API level `GPX` type.
-Finally, on line 58 you return the GPX.
+On lines 25-35 you define an anonymous struct that corresponds to the structure of the GPX xml. There is no need to model the whole structure of the XML, only the elements you are interested in. `encoding/xml` allows you to avoid nesting by using `elem>elem`, like you do in line 26.
+On line 30 and 31 you specify the `Lat` and `Lng` are not XML elements but attributes using `,attr` in the field tag.
+On lines 37 to 40 you use an XML decoder to parse the data into the `xmlData` struct.
+On lines 42 to 52 you transform data in `xmlData` to the API level `GPX` type.
+Finally, on line 54 you return the GPX.
 
 ### Data Aggregation
 
@@ -154,45 +150,45 @@ FROM points
 **Listing 4: Aggregation**
 
 ```go
-61 // roundToMinute rounds time to minute granularity.
-62 func roundToMinute(t time.Time) time.Time {
-63     year, month, day := t.Year(), t.Month(), t.Day()
-64     hour, minute := t.Hour(), t.Minute()
-65 
-66     return time.Date(year, month, day, hour, minute, 0, 0, t.Location())
-67 }
-68 
-69 // meanByMinute aggregates points by the minute.
-70 func meanByMinute(points []Point) []Point {
-71     // Aggregate columns
-72     lats := make(map[time.Time][]float64)
-73     lngs := make(map[time.Time][]float64)
-74 
-75     // Group by minute
-76     for _, pt := range points {
-77         key := roundToMinute(pt.Time)
-78         lats[key] = append(lats[key], pt.Lat)
-79         lngs[key] = append(lngs[key], pt.Lng)
-80     }
-81 
-82     // Average per minute
-83     avgs := make([]Point, len(lngs))
-84     i := 0
-85     for time, lats := range lats {
-86         avgs[i].Time = time
-87         avgs[i].Lat = mean(lats)
-88         avgs[i].Lng = mean(lngs[time])
-89         i++
-90     }
-91 
-92     return avgs
-93 }
+57 // roundToMinute rounds time to minute granularity.
+58 func roundToMinute(t time.Time) time.Time {
+59     year, month, day := t.Year(), t.Month(), t.Day()
+60     hour, minute := t.Hour(), t.Minute()
+61 
+62     return time.Date(year, month, day, hour, minute, 0, 0, t.Location())
+63 }
+64 
+65 // meanByMinute aggregates points by the minute.
+66 func meanByMinute(points []Point) []Point {
+67     // Aggregate columns
+68     lats := make(map[time.Time][]float64)
+69     lngs := make(map[time.Time][]float64)
+70 
+71     // Group by minute
+72     for _, pt := range points {
+73         key := roundToMinute(pt.Time)
+74         lats[key] = append(lats[key], pt.Lat)
+75         lngs[key] = append(lngs[key], pt.Lng)
+76     }
+77 
+78     // Average per minute
+79     avgs := make([]Point, len(lngs))
+80     i := 0
+81     for time, lats := range lats {
+82         avgs[i].Time = time
+83         avgs[i].Lat = mean(lats)
+84         avgs[i].Lng = mean(lngs[time])
+85         i++
+86     }
+87 
+88     return avgs
+89 }
 ```
 
 Listing 4 shows `meanByMinute` that aggregates points by minute.
-On lines 72 and 73 we define the aggregation columns.
-On lines 76-80 we group points by minute. 
-On lines 83-80 we create a new slice of points where each point has the group time and the average of latitude and longitude.
+On lines 69, and 69 you define the aggregation columns.
+On lines 71-76 you group points by minute. 
+On lines 79-86 you create a new slice of points where each point has the group time and the average of latitude and longitude.
 
 ### Map HTML Template & JavaScript
 
@@ -242,11 +238,11 @@ You are going to use `html/template` to render the map. Most of the HTML is stat
 ```
 
 Listing 5 shows the map HTML template file.
-On lines 04-13 we import [bootstrap](https://getbootstrap.com/) for the UI and also the leafletjs CSS and JS files.
-On line 19 we use the template to set the name and date of the GPX file.
-On lines 28-33 we generate a JavaScript array with the points from the input.
-On line 34 we set the `center` variable.
-On lines 36 we import the `map.js` JavaScript code which will use `points` and `center`.
+On lines 04-13 you import [bootstrap](https://getbootstrap.com/) for the UI and also the leafletjs CSS and JS files.
+On line 19 you use the template to set the name and date of the GPX file.
+On lines 28-33 you generate a JavaScript array with the points from the input.
+On line 34 you set the `center` variable.
+On lines 36 you import the `map.js` JavaScript code which will use `points` and `center`.
 
 **Listing 6: Map JavaScript**
 
@@ -278,7 +274,7 @@ On lines 36 we import the `map.js` JavaScript code which will use `points` and `
 ```
 
 Listing 6 show the JavaScript to create the map.
-On line 04 we create the map with a center location and set the zoom level to 15. On lines 05-11 we load the tiles from [OpenStreetMap](https://www.openstreetmap.org/). On lines 14-23 we iterate over the points, adding them to the map as a red circle and setting the tooltip to be the hour.
+On line 04 we create the map with a center location and set the zoom level to 15. On lines 05-11 you load the tiles from [OpenStreetMap](https://www.openstreetmap.org/). On lines 14-23 you iterate over the points, adding them to the map as a red circle and setting the tooltip to be the hour.
 
 ### Map HTTP Handler
 
