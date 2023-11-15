@@ -10,13 +10,14 @@ author = "mikit"
 
 ### Overview
 
-I'm close to my goal of hitting 1,000 kilometer of walking this year.
+I'm close to my goal of hitting 1,000 kilometers of walking this year.
 Whenever I try a new route, I record it. The data that comes out of the recording application ([Strava](https://www.strava.com/dashboard) in my case) is in [GPX format](https://en.wikipedia.org/wiki/GPS_Exchange_Format).
 Starva does visualize the route, but I like to do it on my own as well.
 Which brought me to this blog post about using [Leaflet JS](https://leafletjs.com/) to visualize GPX data.
 
 We're going to write an HTTP server that accepts a GPX file and returns an interactive map showing the points in the GPX.
 The map will look like:
+
 
 ![](map.png)
 
@@ -68,7 +69,7 @@ _Note: Parsing XML with grep is not the best option, for this quick and dirty lo
 
 ### Parsing GPX
 
-Let's start by parsing the GPX file using the build-in `encoing/xml` package.
+Let's start by parsing the GPX file using the built-in `encoing/xml` package.
 
 **Listing 3: Parsing GPX**
 
@@ -145,7 +146,7 @@ SELECT
     strftime('%H:%M', time),
     AVG(lat),
     AVG(lng)
-FROM pts
+FROM points
     GROUP BY strftime('%H:%M', time)
 ;
 ```
@@ -191,9 +192,9 @@ FROM pts
 Listing 4 shows `meanByMinute` that aggregates points by minute.
 On lines 72 and 73 we define the aggregation columns.
 On lines 76-80 we group points by minute. 
-On lines 83-80 we create new slice of points where each point has the group time and the average of latitude and longitude.
+On lines 83-80 we create a new slice of points where each point has the group time and the average of latitude and longitude.
 
-### Map HTML Template
+### Map HTML Template & JavaScript
 
 You are going to use `html/template` to render the map. Most of the HTML is static and you'll generate the title, data and list of points dynamically.
 
@@ -233,43 +234,55 @@ You are going to use `html/template` to render the map. Most of the HTML is stat
 31     { "lat": {{ $pt.Lat }}, "lng": {{ $pt.Lng -}}, "time": {{ $pt.Time }} }
 32     {{- end }}
 33       ];
-34 
-35       function on_loaded() {
-36     var map = L.map('map').setView([{{ .Center.Lat }}, {{ .Center.Lng }}], 15);
-37     L.tileLayer(
-38       'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-39       {
-40         maxZoom: 19,
-41         attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-42       }
-43     ).addTo(map);
-44     points.forEach((pt) => {
-45       let circle = L.circle(
-46         [pt.lat, pt.lng],
-47         {
-48           color: 'red',
-49           radius: 20
-50         }).addTo(map);
-51       circle.bindPopup(pt.time);
-52     });
-53       }
-54 
-55       document.addEventListener('DOMContentLoaded', on_loaded);
-56     </script>
-57   </body>
-58 </html>
-
+34       var center = [{{ .Center.Lat }}, {{ .Center.Lng }}];
+35     </script>
+36     <script src="/map.js"></script>
+37   </body>
+38 </html>
 ```
 
 Listing 5 shows the map HTML template file.
-On lines 04-11 we import [bootstrap](https://getbootstrap.com/) for a nice UI and also the leafletjs CSS and JS files.
+On lines 04-13 we import [bootstrap](https://getbootstrap.com/) for the UI and also the leafletjs CSS and JS files.
 On line 19 we use the template to set the name and date of the GPX file.
-On lines 29-32 we generate a JavaScript array with the points from the input.
-On lines 35-53 we write JavaScript code to generate the map. On line 36 we create the map with a center location and set the zoom level to 20. On lines 37-43 we load the tiles from [OpenStreetMap](https://www.openstreetmap.org/). On lines 44-53 we iterate over the points, adding them to the map on lines 45-50 as a red circle and setting the tooltip to be the hour on line 51.
+On lines 28-33 we generate a JavaScript array with the points from the input.
+On line 34 we set the `center` variable.
+On lines 36 we import the `map.js` JavaScript code which will use `points` and `center`.
+
+**Listing 6: Map JavaScript**
+
+```
+02 function on_loaded() {
+03     // Create map & tiles.
+04     var map = L.map('map').setView(center, 15);
+05     L.tileLayer(
+06         'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+07         {
+08             maxZoom: 19,
+09             attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+10         }
+11     ).addTo(map);
+12 
+13     // Add points with tooltip to map.
+14     points.forEach((pt) => {
+15         let circle = L.circle(
+16             [pt.lat, pt.lng],
+17             {
+18                 color: 'red',
+19                 radius: 20
+20             }).addTo(map);
+21         circle.bindPopup(pt.time);
+22     });
+23 }
+24 
+25 document.addEventListener('DOMContentLoaded', on_loaded);
+```
+
+Listing 6 show the JavaScript to create the map.
+On line 04 we create the map with a center location and set the zoom level to 15. On lines 05-11 we load the tiles from [OpenStreetMap](https://www.openstreetmap.org/). On lines 14-23 we iterate over the points, adding them to the map as a red circle and setting the tooltip to be the hour.
 
 ### Map HTTP Handler
 
-**Listing 6: Map HTTP Handler**
+**Listing 7: Map HTTP Handler**
 
 ```go
 61 // mapHandler gets GPX file via HTML form and return map from mapTemplate.
@@ -330,7 +343,7 @@ On lines 35-53 we write JavaScript code to generate the map. On line 36 we creat
 116 }
 ```
 
-Listing 6 shows the map HTTP handler.
+Listing 7 shows the map HTTP handler.
 On lines 70-74 you parse the HTTP form and get the GPX file from the form.
 On line 83-88 you parse the GPX and aggregate the points.
 On lines 94-110 you generate the data for the template. On lines 95-102 you create the slice of points. On line 104 you calculate the center of the map and on lines 105-110 you create the `data` map that contains all the elements.
@@ -340,68 +353,73 @@ _Note: The `center` function is not shown here. You can view it in the GitHub re
 
 ### Starting The Server
 
-**Listing 7: HTTP Handler**
+**Listing 8: HTTP Handler**
 
 ```go
 12 var (
-13     //go:embed static/index.html
-14     indexHTML []byte
+13     //go:embed index.html map.js
+14     staticFS embed.FS
 15 
-16     //go:embed static/map.html
-17     mapHTML string
-18 
-19     mapTemplate *template.Template
-20 )
-21 
-22 type API struct {
-23     log *slog.Logger
-24 }
-...
-117 
-118 func main() {
-119     log := slog.New(slog.NewTextHandler(os.Stdout, nil))
-120     tmpl, err := template.New("map").Parse(mapHTML)
-121     if err != nil {
-122         log.Error("can't parse map HTML", "error", err)
-123         os.Exit(1)
-124     }
-125     mapTemplate = tmpl
-126 
-127     api := API{
-128         log: log,
-129     }
-130 
-131     mux := http.NewServeMux()
-132     mux.HandleFunc("/", api.indexHandler)
-133     mux.HandleFunc("/map", api.mapHandler)
-134 
-135     addr := ":8080"
-136     srv := http.Server{
-137         Addr:              addr,
-138         Handler:           mux,
-139         ReadHeaderTimeout: time.Second,
-140     }
-141 
-142     log.Info("server starting", "address", addr)
-143     if err := srv.ListenAndServe(); err != nil {
-144         log.Error("can't serve", "error", err)
-145         os.Exit(1)
-146     }
-147 }
+16     //go:embed map.html
+17     mapHTML     string
+18     mapTemplate *template.Template
+19 )
+20 
+21 type API struct {
+22     log *slog.Logger
+23 }
+…
+104 func main() {
+105     log := slog.New(slog.NewTextHandler(os.Stdout, nil))
+106     tmpl, err := template.New("map").Parse(mapHTML)
+107     if err != nil {
+108         log.Error("can't parse map HTML", "error", err)
+109         os.Exit(1)
+110     }
+111     mapTemplate = tmpl
+112 
+113     api := API{
+114         log: log,
+115     }
+116 
+117     mux := http.NewServeMux()
+118     mux.Handle("/", http.FileServer(http.FS(staticFS)))
+119     mux.HandleFunc("/map", api.mapHandler)
+120 
+121     addr := ":8080"
+122     srv := http.Server{
+123         Addr:              addr,
+124         Handler:           mux,
+125         ReadHeaderTimeout: time.Second,
+126     }
+127 
+128     log.Info("server starting", "address", addr)
+129     if err := srv.ListenAndServe(); err != nil {
+130         log.Error("can't serve", "error", err)
+131         os.Exit(1)
+132     }
+133 }
 ```
 
-Listing 7 shows the how you run the HTTP server.
-On lines 12-20 you embed the template in the executable using the `embed` package.
-On lines 22-24 you define the API struct.
-On line 1 you create a logger from the `log/slog` package.
-On lines 120-125 you parse the map HTML template and set the package level `mapTemplate` variable.
-On lines 127-129 you create and API and on lines 131-133 you set the routing.
-On lines 135-140 you create an HTTP server and on lines 142-146 you run it.
+Listing 8 shows how you run the HTTP server.
+On lines 12-18 you embed the HTML files, JavaScript files and the template in the executable using the `embed` package.
+On lines 21-23 you define the API struct which has a log field.
+On line 105 you create a logger from the `log/slog` package.
+On lines 106-111 you parse the map HTML template and set the package level `mapTemplate` variable.
+On lines 113-115 you create an API and on lines 117-119 you set the routing, using `http.FileServer` to serve index.html and map.js.
+On lines 121-126 you create an HTTP server and on lines 128-132 you run it.
 
 
 ### Conclusion
 
-Leaflet JS is a great library for map visualization, it uses OpenStreetMap for which has many layers of detailed data.
-If find it very cool that it only took about 270 lines of Go and JavaScript code to generate an interactive map from raw GPX data.
+Leaflet JS is a great library for map visualization, it uses OpenStreetMap for which has many layers of detailed data. 
+I find it very cool that it only took about 260 lines of Go and JavaScript code to generate an interactive map from raw GPX data.
 
-How do you visualize map data, I'd love to hear from you at miki@ardanlabs.com
+Leaflet JS has many more capabilities, check out their web site for more demos.
+
+There are two other takeaways from this blog. The first is the process: Decide on how you want the visualization to look and inspect the raw data. Once you have the end point and starting point you can start coding. The second takeaway is to not use the same data structures at all levels of your code. You don’t want to expose the data layer (GPX file format) structure to the business logic (aggregation) or to the API (UI layer). If you do that, changes in one layer will not be isolated.
+
+The code is available at [https://github.com/353words/leaflet](https://github.com/353words/leaflet).
+
+How do you visualize map data? I'd love to hear from you at [miki@ardanlabs.com](mailto:miki@ardanlabs.com).
+
