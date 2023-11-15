@@ -20,7 +20,7 @@ type GPX struct {
 	Points []Point
 }
 
-// ParseGPX parses GPX file, returns GPX.
+// ParseGPX parses a GPX file, returns GPX.
 func ParseGPX(r io.Reader) (GPX, error) {
 	var xmlData struct {
 		Time time.Time `xml:"metadata>time"`
