@@ -23,18 +23,14 @@ type GPX struct {
 // ParseGPX parses GPX file, returns GPX.
 func ParseGPX(r io.Reader) (GPX, error) {
 	var xmlData struct {
-		Meta struct {
-			Time time.Time `xml:"time"`
-		} `xml:"metadata"`
-		Trk struct {
-			Name    string `xml:"name"`
-			Segment struct {
-				Points []struct {
-					Lat  float64   `xml:"lat,attr"`
-					Lon  float64   `xml:"lon,attr"`
-					Time time.Time `xml:"time"`
-				} `xml:"trkpt"`
-			} `xml:"trkseg"`
+		Time time.Time `xml:"metadata>time"`
+		Trk  struct {
+			Name   string `xml:"name"`
+			Points []struct {
+				Lat  float64   `xml:"lat,attr"`
+				Lon  float64   `xml:"lon,attr"`
+				Time time.Time `xml:"time"`
+			} `xml:"trkseg>trkpt"`
 		} `xml:"trk"`
 	}
 
@@ -45,11 +41,11 @@ func ParseGPX(r io.Reader) (GPX, error) {
 
 	gpx := GPX{
 		Name:   xmlData.Trk.Name,
-		Time:   xmlData.Meta.Time,
-		Points: make([]Point, len(xmlData.Trk.Segment.Points)),
+		Time:   xmlData.Time,
+		Points: make([]Point, len(xmlData.Trk.Points)),
 	}
 
-	for i, pt := range xmlData.Trk.Segment.Points {
+	for i, pt := range xmlData.Trk.Points {
 		gpx.Points[i].Lat = pt.Lat
 		gpx.Points[i].Lng = pt.Lon
 		gpx.Points[i].Time = pt.Time
