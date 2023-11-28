@@ -25,13 +25,13 @@
       </div>
     </div>
     <script>
-      var points = [
+      let points = [
 	{{- range $idx, $pt := .Points }}
 	{{ if $idx }},{{ end -}}
 	{ "lat": {{ $pt.Lat }}, "lng": {{ $pt.Lng -}}, "time": {{ $pt.Time }} }
 	{{- end }}
       ];
-      var center = [{{ .Center.Lat }}, {{ .Center.Lng }}];
+      let center = [{{ .Center.Lat }}, {{ .Center.Lng }}];
     </script>
     <script src="/map.js"></script>
   </body>
